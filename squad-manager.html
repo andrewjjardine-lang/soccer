@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Squad Manager">
+<meta name="theme-color" content="#0f1923">
+<title>Squad Manager ⚽</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚽</text></svg>">
+<script>
+window.addEventListener('DOMContentLoaded',function(){
+  var c=document.createElement('canvas');c.width=180;c.height=180;
+  var x=c.getContext('2d');
+  x.fillStyle='#1a2f1a';
+  if(x.roundRect)x.roundRect(0,0,180,180,36);
+  else{x.beginPath();x.arc(36,36,36,Math.PI,1.5*Math.PI);x.arc(144,36,36,1.5*Math.PI,2*Math.PI);x.arc(144,144,36,0,0.5*Math.PI);x.arc(36,144,36,0.5*Math.PI,Math.PI);x.closePath();}
+  x.fill();
+  x.font='110px serif';x.textAlign='center';x.textBaseline='middle';
+  x.fillText('⚽',90,95);
+  var l=document.createElement('link');l.rel='apple-touch-icon';l.href=c.toDataURL();
+  document.head.appendChild(l);
+});
+</script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;background:#0f1923;color:#fff;font-family:'DM Sans','Segoe UI',system-ui,sans-serif;-webkit-tap-highlight-color:transparent;overflow-x:hidden;}
+button,input{font-family:inherit;-webkit-tap-highlight-color:transparent;}
+#app{max-width:430px;margin:0 auto;min-height:100vh;position:relative;}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.92);display:flex;align-items:flex-end;z-index:300;}
+.modal-sheet{background:#141e2b;border-radius:20px 20px 0 0;padding:20px 20px 34px;width:100%;max-width:430px;margin:0 auto;max-height:88vh;overflow-y:auto;}
+.tab-bar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:#0d1520;border-top:1px solid #1e2d3d;display:flex;z-index:100;padding-bottom:env(safe-area-inset-bottom);}
+.tab-btn{flex:1;background:none;border:none;padding:10px 0 12px;cursor:pointer;color:#555;transition:color 0.15s;}
+.tab-btn.active{color:#4caf50;}
+.tab-icon{font-size:22px;display:block;}
+.tab-label{font-size:11px;margin-top:2px;display:block;}
+.btn-green{background:#2e7d32;color:#fff;border:none;border-radius:10px;padding:12px;font-size:15px;font-weight:700;cursor:pointer;width:100%;}
+.btn-dim{background:#1e2d3d;color:#aaa;border:none;border-radius:10px;padding:12px;font-size:15px;cursor:pointer;}
+.section-label{font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;}
+input[type=text]{background:#141e2b;border:1px solid #1e2d3d;border-radius:10px;padding:12px 14px;color:#fff;font-size:16px;width:100%;outline:none;}
+.toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:#4caf50;color:#fff;padding:10px 22px;border-radius:20px;font-weight:700;font-size:14px;z-index:1000;box-shadow:0 4px 20px rgba(76,175,80,0.4);white-space:nowrap;pointer-events:none;opacity:0;transition:opacity 0.2s;}
+.toast.show{opacity:1;}
+.scroll-content{padding:14px 14px 100px;}
+::-webkit-scrollbar{display:none;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" class="toast"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script type="text/babel">
+const {useState,useEffect,useRef}=React;
+
+const PC={forward:{active:"#4caf50",dim:"#1a3a1a"},midfield:{active:"#2196f3",dim:"#0d2a4a"},defence:{active:"#ff9800",dim:"#3a2800"},goalie:{active:"#e91e63",dim:"#3a0020"}};
+const POSITIONS=["goalie","defence","midfield","forward"];
+const HALF_OPTIONS=[15,20,25,30,35,40,45];
+const STEPS={IDLE:"idle",OUT:"selectOut",IN:"selectIn",ASSIGN:"assign"};
+const LS={ROSTER:"sqm_roster",NAMES:"sqm_names",FORM:"sqm_formation",CUMTIME:"sqm_cumtime",HISTORY:"sqm_history",HALFLEN:"sqm_halflen"};
+
+function getLoad(t,avg,el){
+  if(el<10)return{color:"#555",label:""};
+  const d=t-avg,th=Math.max(30,el*0.1);
+  if(d>th*1.5)return{color:"#f44336",label:"▲ Over"};
+  if(d>th*0.5)return{color:"#ff9800",label:"↑ High"};
+  if(d<-th*1.5)return{color:"#4caf50",label:"▼ Under"};
+  if(d<-th*0.5)return{color:"#8bc34a",label:"↓ Low"};
+  return{color:"#aaa",label:"≈ Even"};
+}
+const fmt=s=>`${Math.floor(Math.abs(s)/60)}:${(Math.abs(s)%60).toString().padStart(2,"0")}`;
+const fmtDate=d=>new Date(d).toLocaleDateString([],{month:'short',day:'numeric',year:'numeric'});
+function lsGet(k,d){try{const v=localStorage.getItem(k);return v!=null?JSON.parse(v):d;}catch(e){return d;}}
+function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+function showT(msg,col="#4caf50"){const el=document.getElementById('toast');el.textContent=msg;el.style.background=col;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2500);}
+
+let _pid=100;
+const mkPlayers=()=>[
+  {id:1,name:"Alex",pos:"goalie",on:true,wave:1},
+  {id:2,name:"Jordan",pos:"defence",on:true,wave:1},
+  {id:3,name:"Riley",pos:"defence",on:true,wave:1},
+  {id:4,name:"Morgan",pos:"midfield",on:true,wave:1},
+  {id:5,name:"Casey",pos:"midfield",on:true,wave:1},
+  {id:6,name:"Taylor",pos:"forward",on:true,wave:1},
+  {id:7,name:"Sam",pos:"forward",on:true,wave:1},
+  {id:8,name:"Drew",pos:"forward",on:true,wave:1},
+  {id:9,name:"Jamie",pos:null,on:false,wave:null},
+  {id:10,name:"Avery",pos:null,on:false,wave:null},
+  {id:11,name:"Quinn",pos:null,on:false,wave:null},
+];
+
+function App(){
+  // ── Persisted state ──────────────────────────────────────────────────────
+  const [players,setPlayers]=useState(()=>{
+    const s=lsGet(LS.ROSTER,null);
+    if(s&&s.length){_pid=Math.max(...s.map(p=>p.id))+1;return s;}
+    return mkPlayers();
+  });
+  const [form,setForm]=useState(()=>lsGet(LS.FORM,{forwards:3,midfield:2,defence:2,goalie:1}));
+  const [myName,setMyName]=useState(()=>lsGet(LS.NAMES,{my:"My Team",opp:"Them"}).my);
+  const [oppName,setOppName]=useState(()=>lsGet(LS.NAMES,{my:"My Team",opp:"Them"}).opp);
+  const [halfLen,setHalfLen]=useState(()=>lsGet(LS.HALFLEN,20));
+  const [cumTime,setCumTime]=useState(()=>lsGet(LS.CUMTIME,{}));
+  // gameHistory: array of completed game summaries
+  const [history,setHistory]=useState(()=>lsGet(LS.HISTORY,[]));
+
+  // ── Current game state (in-progress, not persisted between sessions) ─────
+  const [view,setView]=useState("field");
+  const [half,setHalf]=useState(1);
+  const [halfTime,setHalfTime]=useState(()=>lsGet(LS.HALFLEN,20)*60);
+  const [running,setRunning]=useState(false);
+  const [elapsed,setElapsed]=useState(0);
+  const [halfOver,setHalfOver]=useState(false);
+  const [gameActive,setGameActive]=useState(false); // true once ▶ first pressed
+  const [score,setScore]=useState({us:0,them:0});
+  const [playTime,setPlayTime]=useState({});  // this game only
+  const [gameGoals,setGameGoals]=useState([]); // goals this game
+  const [editingHdr,setEditingHdr]=useState(null);
+
+  // ── Sub flow ─────────────────────────────────────────────────────────────
+  const [step,setStep]=useState(STEPS.IDLE);
+  const [selOut,setSelOut]=useState([]);
+  const [selIn,setSelIn]=useState([]);
+  const [assigns,setAssigns]=useState({});
+  const [waveNum,setWaveNum]=useState(2);
+
+  // ── UI state ─────────────────────────────────────────────────────────────
+  const [newName,setNewName]=useState("");
+  const [editP,setEditP]=useState(null);
+  const [showHalfMod,setShowHalfMod]=useState(false);
+  const [showGoalMod,setShowGoalMod]=useState(false);
+  const [goalSide,setGoalSide]=useState("us");
+  const [goalScorer,setGoalScorer]=useState(null);
+  const [showEndMod,setShowEndMod]=useState(false);  // End Game confirmation
+  const [showNewMod,setShowNewMod]=useState(false);  // New Game setup
+  const [newOpp,setNewOpp]=useState("");              // opponent for new game
+  const [statsTab,setStatsTab]=useState("game");     // "game"|"season"|"history"
+
+  const intRef=useRef(null);
+  const playRef=useRef(players);
+  playRef.current=players;
+
+  // ── Persist ───────────────────────────────────────────────────────────────
+  useEffect(()=>lsSet(LS.ROSTER,players),[players]);
+  useEffect(()=>lsSet(LS.FORM,form),[form]);
+  useEffect(()=>lsSet(LS.NAMES,{my:myName,opp:oppName}),[myName,oppName]);
+  useEffect(()=>lsSet(LS.HALFLEN,halfLen),[halfLen]);
+  useEffect(()=>lsSet(LS.CUMTIME,cumTime),[cumTime]);
+  useEffect(()=>lsSet(LS.HISTORY,history),[history]);
+
+  // ── Timer ─────────────────────────────────────────────────────────────────
+  useEffect(()=>{
+    if(running){
+      intRef.current=setInterval(()=>{
+        setHalfTime(t=>{if(t<=1){setRunning(false);setHalfOver(true);return 0;}return t-1;});
+        setElapsed(t=>t+1);
+        setPlayTime(pt=>{const u={...pt};playRef.current.forEach(p=>{if(p.on)u[p.id]=(u[p.id]||0)+1;});return u;});
+        setCumTime(ct=>{const u={...ct};playRef.current.forEach(p=>{if(p.on)u[p.id]=(u[p.id]||0)+1;});return u;});
+      },1000);
+    }else clearInterval(intRef.current);
+    return()=>clearInterval(intRef.current);
+  },[running]);
+
+  // ── Sub flow ──────────────────────────────────────────────────────────────
+  const cancelSub=()=>{setStep(STEPS.IDLE);setSelOut([]);setSelIn([]);setAssigns({});};
+  const toggleOut=id=>setSelOut(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+  const toggleIn=id=>{
+    setSelIn(prev=>{
+      if(prev.includes(id)){setAssigns(a=>{const n={...a};delete n[id];return n;});return prev.filter(x=>x!==id);}
+      if(prev.length>=selOut.length)return prev;
+      return[...prev,id];
+    });
+  };
+  const proceedAssign=()=>{
+    const pre={};
+    selIn.forEach((inId,i)=>{const op=players.find(p=>p.id===selOut[i]);if(op?.pos)pre[inId]=op.pos;});
+    setAssigns(pre);setStep(STEPS.ASSIGN);
+  };
+  const confirmSubs=()=>{
+    if(selIn.some(id=>!assigns[id]))return;
+    const w=waveNum;
+    setPlayers(prev=>prev.map(p=>{
+      if(selOut.includes(p.id))return{...p,on:false,pos:null,wave:null};
+      if(selIn.includes(p.id))return{...p,on:true,pos:assigns[p.id],wave:w};
+      return p;
+    }));
+    setWaveNum(c=>c+1);
+    showT(`✓ ${selIn.map(id=>players.find(p=>p.id===id)?.name).join(", ")} on!`);
+    cancelSub();setView("field");
+  };
+
+  // ── Game lifecycle ────────────────────────────────────────────────────────
+  const handleStart=()=>{setGameActive(true);setRunning(true);};
+  const startHalf2=()=>{setHalf(2);setHalfTime(halfLen*60);setHalfOver(false);setRunning(true);showT("2nd half started!");};
+
+  const endGame=()=>{
+    // Save completed game to history
+    const summary={
+      id:Date.now(),
+      date:new Date().toISOString(),
+      myName,oppName,
+      score:{...score},
+      halfLen,
+      goals:[...gameGoals],
+      playTime:{...playTime},
+      playerSnapshot:players.map(p=>({id:p.id,name:p.name})),
+    };
+    setHistory(prev=>[summary,...prev]);
+    // Reset current game but keep roster intact
+    setRunning(false);setElapsed(0);setHalf(1);
+    setHalfTime(halfLen*60);setHalfOver(false);
+    setScore({us:0,them:0});setPlayTime({});setGameGoals([]);
+    setGameActive(false);setWaveNum(2);cancelSub();
+    // Reset players to all starters wave 1, bench stays bench
+    setPlayers(prev=>prev.map(p=>({...p,wave:p.on?1:null})));
+    setShowEndMod(false);
+    showT("Game saved! ✓","#2196f3");
+    setView("field");
+  };
+
+  const startNewGame=()=>{
+    if(newOpp.trim())setOppName(newOpp.trim());
+    setNewOpp("");
+    setShowNewMod(false);
+    // Reset game state fully, keep roster
+    setRunning(false);setElapsed(0);setHalf(1);
+    setHalfTime(halfLen*60);setHalfOver(false);
+    setScore({us:0,them:0});setPlayTime({});setGameGoals([]);
+    setGameActive(false);setWaveNum(2);cancelSub();
+    setPlayers(prev=>prev.map(p=>({...p,wave:p.on?1:null})));
+    showT("New game ready!");
+    setView("field");
+  };
+
+  const applyHL=m=>{setHalfLen(m);setHalfTime(m*60);setHalf(1);setHalfOver(false);setRunning(false);setElapsed(0);setPlayTime({});};
+
+  // ── Goals ─────────────────────────────────────────────────────────────────
+  const openGoalModal=side=>{setGoalSide(side);setGoalScorer(null);setShowGoalMod(true);};
+  const confirmGoal=()=>{
+    const g={
+      id:Date.now(),side:goalSide,
+      scorerId:goalScorer,
+      scorerName:goalScorer?players.find(p=>p.id===goalScorer)?.name:"Unknown",
+      half,gameMin:Math.floor((halfLen*60-halfTime)/60)+(half-1)*halfLen,
+      ts:new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),
+    };
+    setGameGoals(prev=>[...prev,g]);
+    setScore(s=>({...s,[goalSide]:s[goalSide]+1}));
+    setShowGoalMod(false);
+    showT(goalSide==="us"?`⚽ Goal! ${g.scorerName}`:"Goal against","#2e7d32");
+  };
+  const removeGoal=id=>{
+    const g=gameGoals.find(x=>x.id===id);
+    if(g)setScore(s=>({...s,[g.side]:Math.max(0,s[g.side]-1)}));
+    setGameGoals(prev=>prev.filter(x=>x.id!==id));
+  };
+
+  // ── Roster ────────────────────────────────────────────────────────────────
+  const addPlayer=()=>{
+    if(!newName.trim())return;
+    setPlayers(prev=>[...prev,{id:_pid++,name:newName.trim(),pos:null,on:false,wave:null}]);
+    showT(`${newName} added`);setNewName("");setView("bench");
+  };
+
+  // ── Derived ───────────────────────────────────────────────────────────────
+  const field=players.filter(p=>p.on);
+  const bench=players.filter(p=>!p.on);
+  const maxOn=form.forwards+form.midfield+form.defence+form.goalie;
+  const totalPT=players.reduce((s,p)=>s+(playTime[p.id]||0),0);
+  const avgT=players.length>0?totalPT/players.length:0;
+  const maxPT=Math.max(...players.map(p=>playTime[p.id]||0),1);
+  const maxCum=Math.max(...players.map(p=>cumTime[p.id]||0),1);
+  const sortedT=[...players].sort((a,b)=>(playTime[b.id]||0)-(playTime[a.id]||0));
+  const grouped=["goalie","defence","midfield","forward"]
+    .map(pos=>({pos,ps:field.filter(p=>p.pos===pos).sort((a,b)=>(a.wave??999)-(b.wave??999))}))
+    .filter(g=>g.ps.length>0);
+  const byWave=[...field].sort((a,b)=>(a.wave??999)-(b.wave??999));
+  const nextOff=byWave.slice(0,bench.length);
+  const tc=halfTime<=60&&halfTime>0?"#f44336":halfTime===0?"#f44336":running?"#4caf50":"#aaa";
+  const pct=((halfLen*60-halfTime)/(halfLen*60))*100;
+  const allAssigned=selIn.length>0&&selIn.every(id=>assigns[id]);
+  const scorerCounts=gameGoals.filter(g=>g.side==="us").reduce((a,g)=>{if(g.scorerId)a[g.scorerId]=(a[g.scorerId]||0)+1;return a;},{});
+
+  const hdrInput=(key,val,setVal,color)=>editingHdr===key
+    ?<input autoFocus type="text" value={val} onChange={e=>setVal(e.target.value)} onBlur={()=>setEditingHdr(null)} onKeyDown={e=>e.key==="Enter"&&setEditingHdr(null)} style={{width:54,background:"#0f1923",border:`1px solid ${color}`,borderRadius:6,padding:"2px 4px",color,fontSize:11,fontWeight:700,textAlign:"center",outline:"none"}}/>
+    :<div onClick={()=>setEditingHdr(key)} style={{fontSize:9,color,fontWeight:700,letterSpacing:1,cursor:"pointer"}}>{(val||"—").toUpperCase()} <span style={{opacity:0.5}}>✏️</span></div>;
+
+  return(
+    <div style={{fontFamily:"'DM Sans','Segoe UI',system-ui,sans-serif",background:"#0f1923",minHeight:"100vh",color:"#fff",paddingBottom:90}}>
+
+      {/* ═══ HEADER ═══ */}
+      <div style={{background:"linear-gradient(160deg,#142214 0%,#0f1923 100%)",padding:"14px 16px 10px",borderBottom:"1px solid #1a2e1a"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+          <div>
+            <div style={{fontSize:10,color:"#4caf50",fontWeight:700,letterSpacing:2,textTransform:"uppercase"}}>⚽ Squad Manager</div>
+            {editingHdr==="myName"
+              ?<input autoFocus type="text" value={myName} onChange={e=>setMyName(e.target.value)} onBlur={()=>setEditingHdr(null)} onKeyDown={e=>e.key==="Enter"&&setEditingHdr(null)} style={{fontSize:18,fontWeight:800,background:"none",border:"none",borderBottom:"2px solid #4caf50",color:"#fff",outline:"none",width:160,padding:"2px 0",marginTop:2}}/>
+              :<div onClick={()=>setEditingHdr("myName")} style={{fontSize:20,fontWeight:800,cursor:"pointer",marginTop:2,display:"flex",alignItems:"center",gap:6}}>{myName||"My Team"}<span style={{fontSize:12,opacity:0.35}}>✏️</span></div>
+            }
+          </div>
+          {/* Scoreboard */}
+          <div style={{display:"flex",alignItems:"center",gap:6,background:"#141e2b",borderRadius:12,padding:"6px 10px",border:"1px solid #1e2d3d"}}>
+            <div style={{textAlign:"center"}}>
+              {hdrInput("myTeam",myName,setMyName,"#4caf50")}
+              <div style={{display:"flex",alignItems:"center",gap:3}}>
+                <button onClick={()=>setScore(s=>({...s,us:Math.max(0,s.us-1)}))} style={{background:"none",border:"none",color:"#555",fontSize:16,cursor:"pointer",padding:"0 1px"}}>−</button>
+                <span style={{fontSize:26,fontWeight:900,minWidth:22,textAlign:"center"}}>{score.us}</span>
+                <button onClick={()=>openGoalModal("us")} style={{background:"#2e7d32",border:"none",color:"#fff",fontSize:13,cursor:"pointer",borderRadius:6,padding:"3px 5px",fontWeight:700}}>+⚽</button>
+              </div>
+            </div>
+            <div style={{fontSize:18,color:"#555",fontWeight:900}}>–</div>
+            <div style={{textAlign:"center"}}>
+              {hdrInput("opp",oppName,setOppName,"#f44336")}
+              <div style={{display:"flex",alignItems:"center",gap:3}}>
+                <button onClick={()=>setScore(s=>({...s,them:Math.max(0,s.them-1)}))} style={{background:"none",border:"none",color:"#555",fontSize:16,cursor:"pointer",padding:"0 1px"}}>−</button>
+                <span style={{fontSize:26,fontWeight:900,minWidth:22,textAlign:"center"}}>{score.them}</span>
+                <button onClick={()=>openGoalModal("them")} style={{background:"#c62828",border:"none",color:"#fff",fontSize:13,cursor:"pointer",borderRadius:6,padding:"3px 5px",fontWeight:700}}>+⚽</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Timer */}
+        <div style={{background:"#0d1520",borderRadius:12,padding:"10px 14px",border:"1px solid #1e2d3d"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+              <span style={{fontSize:32,fontWeight:900,color:tc,fontVariantNumeric:"tabular-nums",letterSpacing:1,lineHeight:1}}>{fmt(halfTime)}</span>
+              <span style={{fontSize:11,color:"#555",fontWeight:600}}>
+                {halfOver?(half===1?"HALF TIME":"FULL TIME"):`HALF ${half} · ${halfLen}min`}
+              </span>
+            </div>
+            <div style={{display:"flex",gap:5}}>
+              {!halfOver&&(
+                <button onClick={gameActive?()=>setRunning(r=>!r):handleStart}
+                  style={{background:running?"#c62828":"#2e7d32",color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontWeight:700,fontSize:14,cursor:"pointer"}}>
+                  {running?"⏸":"▶"}
+                </button>
+              )}
+              <button onClick={()=>setShowHalfMod(true)} style={{background:"#1e2d3d",color:"#aaa",border:"1px solid #2a3d50",borderRadius:8,padding:"7px 9px",fontSize:13,cursor:"pointer"}}>⚙️</button>
+              {/* End Game button — only shows once game started */}
+              {gameActive&&(
+                <button onClick={()=>setShowEndMod(true)} style={{background:"#1a2530",color:"#90caf9",border:"1px solid #2196f388",borderRadius:8,padding:"7px 9px",fontSize:12,fontWeight:700,cursor:"pointer"}}>End</button>
+              )}
+              {!gameActive&&(
+                <button onClick={()=>setShowNewMod(true)} style={{background:"#1a2530",color:"#aaa",border:"1px solid #2a3d50",borderRadius:8,padding:"7px 9px",fontSize:12,cursor:"pointer"}}>↺</button>
+              )}
+            </div>
+          </div>
+          <div style={{background:"#1a2530",borderRadius:20,height:5,overflow:"hidden"}}>
+            <div style={{width:`${pct}%`,height:"100%",background:halfTime<=60?"#f44336":"#4caf50",borderRadius:20,transition:"width 1s linear"}}/>
+          </div>
+        </div>
+
+        <div style={{marginTop:8,display:"flex",gap:6,fontSize:11,color:"#aaa",flexWrap:"wrap"}}>
+          <span style={{background:"#1e3a1e",borderRadius:20,padding:"3px 10px",color:"#4caf50"}}>🟢 {field.length} on</span>
+          <span style={{background:"#1a2530",borderRadius:20,padding:"3px 10px"}}>🪑 {bench.length} bench</span>
+          <span style={{background:"#1a2530",borderRadius:20,padding:"3px 10px"}}>👥 {players.length} total</span>
+          {gameGoals.filter(g=>g.side==="us").length>0&&<span style={{background:"#1a2f1a",borderRadius:20,padding:"3px 10px",color:"#4caf50"}}>⚽ {gameGoals.filter(g=>g.side==="us").length}</span>}
+        </div>
+      </div>
+
+      {/* Half over banner */}
+      {halfOver&&(
+        <div style={{background:half===1?"#0d2a4a":"#0d2a1a",borderBottom:`2px solid ${half===1?"#2196f3":"#4caf50"}`,padding:"14px 20px"}}>
+          <div style={{textAlign:"center",marginBottom:10}}>
+            <div style={{fontWeight:800,fontSize:16,color:half===1?"#90caf9":"#81c784"}}>{half===1?"⏱ HALF TIME":"🏁 FULL TIME"}</div>
+            <div style={{fontSize:13,color:"#aaa",marginTop:2}}>Score: <strong style={{color:"#fff"}}>{myName} {score.us} – {score.them} {oppName}</strong></div>
+          </div>
+          {half===1
+            ?<button onClick={startHalf2} style={{width:"100%",background:"#1565c0",color:"#fff",border:"none",borderRadius:10,padding:"11px 0",fontWeight:800,fontSize:15,cursor:"pointer"}}>▶ Start 2nd Half</button>
+            :<button onClick={()=>setShowEndMod(true)} style={{width:"100%",background:"#1a2f3a",color:"#90caf9",border:"2px solid #2196f3",borderRadius:10,padding:"11px 0",fontWeight:800,fontSize:15,cursor:"pointer"}}>✓ End Game & Save</button>
+          }
+        </div>
+      )}
+
+      {/* Sub banner */}
+      {step!==STEPS.IDLE&&(
+        <div style={{background:"#1a0d3a",borderBottom:"2px solid #9c27b0",padding:"10px 14px"}}>
+          {step===STEPS.OUT&&(
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:11,color:"#ce93d8",fontWeight:700,letterSpacing:1}}>STEP 1 — WHO COMES OFF?</div>
+                <div style={{fontSize:13,color:"#fff",marginTop:2}}>{selOut.length===0?"Tap players on the field":<>{selOut.length} selected — <span style={{color:"#ce93d8"}}>Next →</span></>}</div>
+              </div>
+              <div style={{display:"flex",gap:6}}>
+                {selOut.length>0&&<button onClick={()=>{setStep(STEPS.IN);setView("bench");}} style={{background:"#7b1fa2",color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontWeight:700,fontSize:13,cursor:"pointer"}}>Next →</button>}
+                <button onClick={cancelSub} style={{background:"none",border:"1px solid #555",color:"#aaa",borderRadius:8,padding:"7px 10px",fontSize:12,cursor:"pointer"}}>✕</button>
+              </div>
+            </div>
+          )}
+          {step===STEPS.IN&&(
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:11,color:"#ce93d8",fontWeight:700,letterSpacing:1}}>STEP 2 — WHO COMES ON?</div>
+                <div style={{fontSize:13,color:"#fff",marginTop:2}}>{selIn.length===0?`Tap up to ${selOut.length} from bench`:<>{selIn.length}/{selOut.length} — <span style={{color:"#ce93d8"}}>Next →</span></>}</div>
+              </div>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={()=>{setStep(STEPS.OUT);setView("field");setSelIn([]);setAssigns({});}} style={{background:"none",border:"1px solid #9c27b0",color:"#ce93d8",borderRadius:8,padding:"7px 10px",fontSize:12,cursor:"pointer"}}>← Back</button>
+                {selIn.length>0&&<button onClick={proceedAssign} style={{background:"#7b1fa2",color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontWeight:700,fontSize:13,cursor:"pointer"}}>Next →</button>}
+                <button onClick={cancelSub} style={{background:"none",border:"1px solid #555",color:"#aaa",borderRadius:8,padding:"7px 10px",fontSize:12,cursor:"pointer"}}>✕</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══ END GAME MODAL ═══ */}
+      {showEndMod&&(
+        <div className="modal-overlay">
+          <div className="modal-sheet">
+            <div style={{fontSize:18,fontWeight:800,marginBottom:6,color:"#90caf9"}}>🏁 End Game?</div>
+            <div style={{background:"#0f1923",borderRadius:12,padding:"14px 16px",marginBottom:16,border:"1px solid #1e2d3d"}}>
+              <div style={{fontSize:22,fontWeight:900,textAlign:"center",marginBottom:8}}>{myName} {score.us} – {score.them} {oppName}</div>
+              <div style={{fontSize:12,color:"#888",textAlign:"center"}}>Half {half} · {fmt(elapsed)} played · {gameGoals.filter(g=>g.side==="us").length} goal{gameGoals.filter(g=>g.side==="us").length!==1?"s":""}</div>
+            </div>
+            <div style={{fontSize:13,color:"#aaa",marginBottom:18}}>This will save the game to your history and reset the clock and score. Your roster and season stats are kept.</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setShowEndMod(false)} className="btn-dim" style={{flex:1}}>Cancel</button>
+              <button onClick={endGame} style={{flex:2,background:"#1565c0",color:"#fff",border:"none",borderRadius:10,padding:13,fontSize:15,fontWeight:800,cursor:"pointer"}}>✓ Save & End Game</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ NEW GAME MODAL ═══ */}
+      {showNewMod&&(
+        <div className="modal-overlay">
+          <div className="modal-sheet">
+            <div style={{fontSize:18,fontWeight:800,marginBottom:6,color:"#4caf50"}}>⚽ New Game</div>
+            <div style={{fontSize:13,color:"#aaa",marginBottom:16}}>Set the opponent for this game. Your roster stays as-is.</div>
+            <div style={{marginBottom:20}}>
+              <label style={{fontSize:12,color:"#888",display:"block",marginBottom:6}}>Opponent name</label>
+              <input type="text" value={newOpp} onChange={e=>setNewOpp(e.target.value)} placeholder={oppName||"Opponent"} onKeyDown={e=>e.key==="Enter"&&startNewGame()}/>
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setShowNewMod(false)} className="btn-dim" style={{flex:1}}>Cancel</button>
+              <button onClick={startNewGame} style={{flex:2,background:"#2e7d32",color:"#fff",border:"none",borderRadius:10,padding:13,fontSize:15,fontWeight:800,cursor:"pointer"}}>Start New Game</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ GOAL MODAL ═══ */}
+      {showGoalMod&&(
+        <div className="modal-overlay">
+          <div className="modal-sheet">
+            <div style={{fontSize:16,fontWeight:800,marginBottom:4,color:goalSide==="us"?"#4caf50":"#f44336"}}>{goalSide==="us"?"⚽ Who scored?":"⚽ Goal against"}</div>
+            <div style={{fontSize:12,color:"#888",marginBottom:16}}>{goalSide==="us"?"Tap the scorer or skip to record without one.":"Tap skip to just add to the score."}</div>
+            {goalSide==="us"&&(
+              <div style={{marginBottom:16}}>
+                {[...players].sort((a,b)=>a.name.localeCompare(b.name)).map(p=>{
+                  const sel=goalScorer===p.id;
+                  return(
+                    <div key={p.id} onClick={()=>setGoalScorer(sel?null:p.id)}
+                      style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",borderRadius:10,marginBottom:8,background:sel?"#1a3a1a":"#0f1923",border:`1.5px solid ${sel?"#4caf50":"#1e2d3d"}`,cursor:"pointer"}}>
+                      <div style={{width:34,height:34,borderRadius:"50%",background:sel?"#4caf5022":"#1a2530",border:`2px solid ${sel?"#4caf50":"#2a3d50"}`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:15,color:sel?"#4caf50":"#aaa",flexShrink:0}}>
+                        {sel?"⚽":p.name[0]}
+                      </div>
+                      <div style={{flex:1}}>
+                        <div style={{fontWeight:700,fontSize:14}}>{p.name}</div>
+                        <div style={{fontSize:11,color:"#555",textTransform:"capitalize"}}>{p.on?(p.pos||"field"):"bench"}{(scorerCounts[p.id]||0)>0?` · ${scorerCounts[p.id]} goal${scorerCounts[p.id]>1?"s":""} today`:""}</div>
+                      </div>
+                      {sel&&<div style={{fontSize:18}}>✓</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setShowGoalMod(false)} className="btn-dim" style={{flex:1}}>Cancel</button>
+              <button onClick={()=>{setGoalScorer(null);confirmGoal();}} className="btn-dim" style={{flex:1}}>Skip</button>
+              <button onClick={confirmGoal} style={{flex:2,background:goalSide==="us"?"#2e7d32":"#c62828",color:"#fff",border:"none",borderRadius:10,padding:12,fontSize:15,fontWeight:800,cursor:"pointer"}}>✓ Record</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ ASSIGN MODAL ═══ */}
+      {step===STEPS.ASSIGN&&(
+        <div className="modal-overlay">
+          <div className="modal-sheet">
+            <div style={{fontSize:16,fontWeight:800,marginBottom:4,color:"#ce93d8"}}>Step 3 — Assign Positions</div>
+            <div style={{fontSize:12,color:"#888",marginBottom:18}}>Set where each player will play</div>
+            {selIn.map((inId,i)=>{
+              const pIn=players.find(p=>p.id===inId),pOut=players.find(p=>p.id===selOut[i]),asgn=assigns[inId];
+              return(
+                <div key={inId} style={{marginBottom:18,background:"#0f1923",borderRadius:12,padding:"12px 14px",border:`1px solid ${asgn?"#9c27b099":"#2a3d50"}`}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                    <div style={{flex:1,display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{width:32,height:32,borderRadius:"50%",background:"#1a2530",border:"2px solid #4caf50",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:14,color:"#4caf50"}}>{pIn?.name[0]}</div>
+                      <div><div style={{fontWeight:700,fontSize:14}}>{pIn?.name}</div><div style={{fontSize:11,color:"#4caf50"}}>coming on</div></div>
+                    </div>
+                    <div style={{color:"#555",fontSize:18}}>↔</div>
+                    <div style={{flex:1,display:"flex",alignItems:"center",gap:8,justifyContent:"flex-end"}}>
+                      <div style={{textAlign:"right"}}><div style={{fontWeight:700,fontSize:14}}>{pOut?.name??"-"}</div><div style={{fontSize:11,color:"#f44336"}}>off{pOut?.pos?` (${pOut.pos})`:""}</div></div>
+                      <div style={{width:32,height:32,borderRadius:"50%",background:"#1a2530",border:"2px solid #f44336",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:14,color:"#f44336"}}>{pOut?.name[0]??"-"}</div>
+                    </div>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+                    {POSITIONS.map(pos=>{const col=PC[pos],sel=asgn===pos;return<button key={pos} onClick={()=>setAssigns(a=>({...a,[inId]:pos}))} style={{padding:"9px 2px",borderRadius:8,border:`2px solid ${sel?col.active:"#1e2d3d"}`,background:sel?col.dim:"#141e2b",color:sel?col.active:"#666",fontWeight:700,fontSize:11,cursor:"pointer",textTransform:"capitalize"}}>{pos}</button>;})}
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{display:"flex",gap:10,marginTop:4}}>
+              <button onClick={()=>setStep(STEPS.IN)} className="btn-dim" style={{flex:1}}>← Back</button>
+              <button onClick={confirmSubs} disabled={!allAssigned} style={{flex:2,background:allAssigned?"#7b1fa2":"#2a1a3a",color:allAssigned?"#fff":"#555",border:"none",borderRadius:10,padding:12,fontSize:15,fontWeight:800,cursor:allAssigned?"pointer":"default"}}>
+                ✓ Confirm {selIn.length>1?`${selIn.length} Subs`:"Sub"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit player */}
+      {editP&&(
+        <div className="modal-overlay">
+          <div className="modal-sheet">
+            <div style={{fontSize:16,fontWeight:700,marginBottom:16}}>Edit Player</div>
+            <div style={{marginBottom:16}}>
+              <label style={{fontSize:12,color:"#888",display:"block",marginBottom:6}}>Name</label>
+              <input type="text" value={editP.name} onChange={e=>setEditP(p=>({...p,name:e.target.value}))}/>
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setEditP(null)} className="btn-dim" style={{flex:1}}>Cancel</button>
+              <button onClick={()=>{setPlayers(prev=>prev.map(p=>p.id===editP.id?{...p,name:editP.name}:p));setEditP(null);showT("Updated");}} className="btn-green" style={{flex:1}}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Half length */}
+      {showHalfMod&&(
+        <div className="modal-overlay">
+          <div className="modal-sheet">
+            <div style={{fontSize:16,fontWeight:700,marginBottom:4}}>⏱ Half Length</div>
+            <div style={{fontSize:12,color:"#888",marginBottom:16}}>Changing resets the current game timer.</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:20}}>
+              {HALF_OPTIONS.map(m=>{const sel=halfLen===m;return<button key={m} onClick={()=>{applyHL(m);setShowHalfMod(false);showT(`${m} min halves`);}} style={{padding:"14px 4px",borderRadius:10,border:`2px solid ${sel?"#4caf50":"#1e2d3d"}`,background:sel?"#1a3a1a":"#0f1923",color:sel?"#4caf50":"#aaa",fontWeight:700,fontSize:18,cursor:"pointer"}}>{m}</button>;})}
+            </div>
+            <button onClick={()=>setShowHalfMod(false)} className="btn-dim" style={{width:"100%"}}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ MAIN CONTENT ═══ */}
+      <div className="scroll-content">
+
+        {/* FIELD */}
+        {view==="field"&&(
+          <div>
+            {!gameActive&&(
+              <div style={{background:"#0d2a1a",border:"2px solid #4caf50",borderRadius:10,padding:"12px 16px",marginBottom:14,textAlign:"center"}}>
+                <div style={{fontSize:14,color:"#81c784",fontWeight:700,marginBottom:6}}>Ready to start</div>
+                <div style={{fontSize:12,color:"#555",marginBottom:10}}>Press ▶ in the timer above to begin, or set the opponent first</div>
+                <button onClick={()=>setShowNewMod(true)} style={{background:"none",color:"#4caf50",border:"1px solid #4caf50",borderRadius:8,padding:"6px 16px",fontSize:13,fontWeight:700,cursor:"pointer"}}>Set Opponent & Start</button>
+              </div>
+            )}
+            {step===STEPS.IDLE&&bench.length>0&&(
+              <button onClick={()=>setStep(STEPS.OUT)} style={{width:"100%",background:"#1a0d3a",border:"2px solid #9c27b0",color:"#ce93d8",borderRadius:10,padding:"10px 0",fontWeight:700,fontSize:14,cursor:"pointer",marginBottom:12}}>
+                🔄 Make Substitution{bench.length>=3?` (${bench.length} ready)`:""}
+              </button>
+            )}
+            {elapsed>=10&&(
+              <div style={{display:"flex",gap:10,marginBottom:10,alignItems:"center"}}>
+                <span style={{fontSize:10,color:"#555"}}>Load:</span>
+                {[["#4caf50","Under"],["#aaa","Even"],["#ff9800","High"],["#f44336","Over"]].map(([c,l])=>(
+                  <span key={l} style={{fontSize:10,color:c,display:"flex",alignItems:"center",gap:3}}><span style={{width:7,height:7,borderRadius:"50%",background:c,display:"inline-block"}}/>{l}</span>
+                ))}
+              </div>
+            )}
+            {grouped.map(({pos,ps})=>{
+              const col=PC[pos];
+              return(
+                <div key={pos} style={{marginBottom:12}}>
+                  <div className="section-label" style={{color:col.active}}>{pos.charAt(0).toUpperCase()+pos.slice(1)}{ps.length>1?"s":""}</div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                    {ps.map(p=>{
+                      const load=getLoad(playTime[p.id]||0,avgT,elapsed),isOut=selOut.includes(p.id),isDue=nextOff.some(x=>x.id===p.id)&&step===STEPS.IDLE;
+                      return<FC key={p.id} p={p} pt={playTime[p.id]||0} col={col} load={load} isOut={isOut} isDue={isDue} step={step} goals={scorerCounts[p.id]||0} onTap={()=>{if(step===STEPS.OUT)toggleOut(p.id);}} onEdit={()=>setEditP({...p})}/>;
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+            {field.length===0&&<div style={{color:"#555",textAlign:"center",padding:40}}>No players on field.</div>}
+            {step===STEPS.IDLE&&bench.length>0&&nextOff.length>0&&(
+              <div style={{marginTop:10,padding:"12px 14px",background:"#1a2f1a",borderRadius:10,border:"1px solid #2e7d32"}}>
+                <div style={{fontSize:12,color:"#4caf50",fontWeight:700,marginBottom:6}}>Suggested off ({bench.length} on bench):</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {nextOff.map((p,i)=>(
+                    <span key={p.id} style={{background:"#0f1923",border:"1px solid #2e7d32",borderRadius:20,padding:"3px 10px",fontSize:12,color:"#fff",display:"flex",alignItems:"center",gap:5}}>
+                      <span style={{background:"#2e7d32",color:"#fff",borderRadius:"50%",width:16,height:16,display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:900}}>{i+1}</span>{p.name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* BENCH */}
+        {view==="bench"&&(
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div>
+                <div style={{fontSize:16,fontWeight:700}}>🪑 Bench</div>
+                {step===STEPS.IN&&<div style={{fontSize:11,color:"#ce93d8",marginTop:2}}>Select up to {selOut.length} to come on</div>}
+              </div>
+              {step===STEPS.IDLE&&<button onClick={()=>setView("addPlayer")} style={{background:"#2e7d32",color:"#fff",border:"none",borderRadius:20,padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Add</button>}
+            </div>
+            {bench.length===0&&<div style={{color:"#555",textAlign:"center",padding:30}}>No bench players</div>}
+            {[...bench].sort((a,b)=>(playTime[a.id]||0)-(playTime[b.id]||0)).map(p=>{
+              const load=getLoad(playTime[p.id]||0,avgT,elapsed),isIn=selIn.includes(p.id);
+              const canSel=step===STEPS.IN&&(isIn||selIn.length<selOut.length);
+              return(
+                <div key={p.id} onClick={()=>{if(step===STEPS.IN)toggleIn(p.id);}}
+                  style={{background:isIn?"#1a0d3a":"#141e2b",border:`1.5px solid ${isIn?"#9c27b0":step===STEPS.IN?"#4a2a6a":"#1e2d3d"}`,borderRadius:12,padding:"11px 14px",marginBottom:10,display:"flex",alignItems:"center",gap:12,cursor:canSel||isIn?"pointer":"default",opacity:step===STEPS.IN&&!canSel&&!isIn?0.4:1,transition:"all 0.15s"}}>
+                  <div style={{width:42,height:42,borderRadius:"50%",background:isIn?"#7b1fa222":"#1a2530",border:`2px solid ${isIn?"#9c27b0":"#2a3d50"}`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:17,color:isIn?"#ce93d8":"#aaa",flexShrink:0}}>
+                    {isIn?"✓":p.name[0]}
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:700,fontSize:15}}>{p.name}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginTop:3}}>
+                      <span style={{fontSize:12,color:"#888",fontVariantNumeric:"tabular-nums"}}>⏱ {fmt(playTime[p.id]||0)}</span>
+                      {elapsed>=10&&<span style={{fontSize:11,color:load.color,fontWeight:700}}>{load.label}</span>}
+                    </div>
+                  </div>
+                  {step===STEPS.IDLE&&<button onClick={e=>{e.stopPropagation();setPlayers(prev=>prev.filter(x=>x.id!==p.id));showT("Removed");}} style={{background:"none",color:"#c62828",border:"1px solid #c62828",borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer"}}>Remove</button>}
+                  {step===STEPS.IN&&<div style={{fontSize:12,color:isIn?"#ce93d8":"#555",fontWeight:700}}>{isIn?`#${selIn.indexOf(p.id)+1}`:"Tap"}</div>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* STATS */}
+        {view==="stats"&&(
+          <div>
+            {/* Sub-tabs */}
+            <div style={{display:"flex",gap:6,marginBottom:16}}>
+              {[["game","This Game"],["season","Season"],["history","History"]].map(([id,label])=>(
+                <button key={id} onClick={()=>setStatsTab(id)} style={{flex:1,padding:"8px 4px",borderRadius:8,border:`1.5px solid ${statsTab===id?"#4caf50":"#1e2d3d"}`,background:statsTab===id?"#1a3a1a":"#141e2b",color:statsTab===id?"#4caf50":"#888",fontWeight:700,fontSize:12,cursor:"pointer"}}>{label}</button>
+              ))}
+            </div>
+
+            {/* This Game */}
+            {statsTab==="game"&&(
+              <div>
+                {elapsed>=10&&<div style={{fontSize:12,color:"#888",marginBottom:12}}>Avg: {fmt(Math.round(avgT))} · Elapsed: {fmt(elapsed)}</div>}
+                {sortedT.map(p=>{
+                  const t=playTime[p.id]||0,load=getLoad(t,avgT,elapsed),pb=Math.round((t/Math.max(maxPT,1))*100),gc=scorerCounts[p.id]||0;
+                  return(
+                    <div key={p.id} style={{marginBottom:12}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,alignItems:"center"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{width:10,height:10,borderRadius:"50%",background:load.color,display:"inline-block",flexShrink:0}}/>
+                          <span style={{fontWeight:600,fontSize:14}}>{p.name}</span>
+                          {gc>0&&<span style={{fontSize:11,color:"#4caf50"}}>{"⚽".repeat(gc)}</span>}
+                          <span style={{fontSize:11,color:"#555",textTransform:"capitalize"}}>{p.on?(p.pos||"?"):"bench"}</span>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          {elapsed>=10&&<span style={{fontSize:11,color:load.color,fontWeight:700}}>{load.label}</span>}
+                          <span style={{fontSize:14,fontWeight:700,fontVariantNumeric:"tabular-nums"}}>{fmt(t)}</span>
+                        </div>
+                      </div>
+                      <div style={{background:"#1a2530",borderRadius:20,height:8,overflow:"hidden"}}>
+                        <div style={{width:`${pb}%`,height:"100%",background:load.color,borderRadius:20,transition:"width 0.5s"}}/>
+                      </div>
+                    </div>
+                  );
+                })}
+                {elapsed===0&&<div style={{color:"#555",textAlign:"center",padding:"20px 0"}}>Start the game to track playing time</div>}
+
+                {/* Goals this game */}
+                {gameGoals.length>0&&(
+                  <div style={{marginTop:20,paddingTop:16,borderTop:"1px solid #1e2d3d"}}>
+                    <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>⚽ Goals</div>
+                    {gameGoals.slice().reverse().map(g=>(
+                      <div key={g.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",background:"#141e2b",borderRadius:10,marginBottom:8,border:`1px solid ${g.side==="us"?"#2e7d32":"#c62828"}22`}}>
+                        <div style={{fontSize:20}}>{g.side==="us"?"⚽":"🔴"}</div>
+                        <div style={{flex:1}}>
+                          <div style={{fontWeight:700,fontSize:14,color:g.side==="us"?"#fff":"#f44336"}}>{g.side==="us"?g.scorerName:oppName||"Opponent"}</div>
+                          <div style={{fontSize:11,color:"#555"}}>Half {g.half} · ~{g.gameMin}' · {g.ts}</div>
+                        </div>
+                        <button onClick={()=>removeGoal(g.id)} style={{background:"none",border:"none",color:"#555",fontSize:16,cursor:"pointer",padding:"4px 6px"}}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Season totals */}
+            {statsTab==="season"&&(
+              <div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <div style={{fontSize:13,color:"#888"}}>{history.length} game{history.length!==1?"s":""} played</div>
+                  <button onClick={()=>{if(confirm("Clear season play time totals?"))setCumTime({});}} style={{background:"none",color:"#555",border:"1px solid #333",borderRadius:8,padding:"4px 10px",fontSize:11,cursor:"pointer"}}>Clear</button>
+                </div>
+                {[...players].sort((a,b)=>(cumTime[b.id]||0)-(cumTime[a.id]||0)).map(p=>{
+                  const ct=cumTime[p.id]||0;
+                  const pg=history.reduce((n,g)=>{const gs=g.goals||[];return n+gs.filter(x=>x.scorerId===p.id).length;},0);
+                  const pb2=Math.round((ct/Math.max(maxCum,1))*100);
+                  return(
+                    <div key={p.id} style={{marginBottom:12}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,alignItems:"center"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{fontWeight:600,fontSize:14}}>{p.name}</span>
+                          {pg>0&&<span style={{fontSize:11,color:"#4caf50",fontWeight:700}}>⚽ {pg}</span>}
+                        </div>
+                        <span style={{fontSize:13,fontWeight:700,fontVariantNumeric:"tabular-nums",color:"#aaa"}}>{fmt(ct)}</span>
+                      </div>
+                      <div style={{background:"#1a2530",borderRadius:20,height:6,overflow:"hidden"}}>
+                        <div style={{width:`${pb2}%`,height:"100%",background:"#2196f3",borderRadius:20}}/>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Game history */}
+            {statsTab==="history"&&(
+              <div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <div style={{fontSize:13,color:"#888"}}>{history.length} game{history.length!==1?"s":""} recorded</div>
+                  {history.length>0&&<button onClick={()=>{if(confirm("Delete all game history?"))setHistory([]);}} style={{background:"none",color:"#555",border:"1px solid #333",borderRadius:8,padding:"4px 10px",fontSize:11,cursor:"pointer"}}>Clear</button>}
+                </div>
+                {history.length===0&&<div style={{color:"#555",textAlign:"center",padding:30}}>No games recorded yet.<br/>End a game to save it here.</div>}
+                {history.map((g,i)=>{
+                  const win=g.score.us>g.score.them,draw=g.score.us===g.score.them;
+                  const resultCol=win?"#4caf50":draw?"#ff9800":"#f44336";
+                  const resultLabel=win?"W":draw?"D":"L";
+                  const ourGoals=(g.goals||[]).filter(x=>x.side==="us");
+                  return(
+                    <div key={g.id} style={{background:"#141e2b",border:`1px solid ${resultCol}33`,borderRadius:12,padding:"14px 16px",marginBottom:10}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                        <div>
+                          <div style={{fontSize:12,color:"#555",marginBottom:3}}>{fmtDate(g.date)}</div>
+                          <div style={{fontSize:16,fontWeight:800}}>{g.myName} <span style={{color:resultCol}}>{g.score.us}</span> – <span style={{color:resultCol}}>{g.score.them}</span> {g.oppName}</div>
+                        </div>
+                        <div style={{background:resultCol,color:"#000",borderRadius:8,padding:"4px 10px",fontWeight:900,fontSize:16}}>{resultLabel}</div>
+                      </div>
+                      {ourGoals.length>0&&(
+                        <div style={{fontSize:12,color:"#4caf50",marginBottom:6}}>
+                          ⚽ {ourGoals.map(gl=>gl.scorerName+(gl.gameMin?` ${gl.gameMin}'`:"")+` (H${gl.half})`).join(", ")}
+                        </div>
+                      )}
+                      <div style={{fontSize:11,color:"#555"}}>{g.halfLen} min halves</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ADD PLAYER */}
+        {view==="addPlayer"&&(
+          <div>
+            <div style={{fontSize:16,fontWeight:700,marginBottom:16}}>➕ Add Player</div>
+            <div style={{marginBottom:20}}>
+              <label style={{fontSize:12,color:"#888",display:"block",marginBottom:6}}>Name</label>
+              <input type="text" value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Enter name..." onKeyDown={e=>e.key==="Enter"&&addPlayer()}/>
+              <div style={{fontSize:11,color:"#555",marginTop:6}}>Position assigned when they come on.</div>
+            </div>
+            <button onClick={addPlayer} className="btn-green">Add to Bench</button>
+          </div>
+        )}
+
+        {/* SETTINGS */}
+        {view==="settings"&&(
+          <div>
+            <div style={{fontSize:16,fontWeight:700,marginBottom:14}}>⚙️ Settings</div>
+            <div style={{background:"#141e2b",border:"1px solid #1e2d3d",borderRadius:12,padding:"14px 16px",marginBottom:10}}>
+              <div style={{fontSize:12,color:"#888",marginBottom:8,fontWeight:600,letterSpacing:1}}>TEAM NAME</div>
+              <input type="text" value={myName} onChange={e=>setMyName(e.target.value)} style={{marginBottom:12}}/>
+              <div style={{fontSize:12,color:"#888",marginBottom:8,fontWeight:600,letterSpacing:1}}>DEFAULT OPPONENT</div>
+              <input type="text" value={oppName} onChange={e=>setOppName(e.target.value)}/>
+            </div>
+            <div style={{fontSize:12,color:"#888",fontWeight:600,letterSpacing:1,margin:"14px 0 8px"}}>FORMATION</div>
+            {["forwards","midfield","defence","goalie"].map(key=>(
+              <div key={key} style={{background:"#141e2b",border:"1px solid #1e2d3d",borderRadius:12,padding:"12px 16px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontWeight:600,fontSize:15,textTransform:"capitalize"}}>{key}</span>
+                <div style={{display:"flex",alignItems:"center",gap:14}}>
+                  <button onClick={()=>setForm(f=>({...f,[key]:Math.max(0,f[key]-1)}))} style={{width:34,height:34,borderRadius:"50%",background:"#1e2d3d",border:"none",color:"#fff",fontSize:20,cursor:"pointer"}}>−</button>
+                  <span style={{fontSize:22,fontWeight:800,minWidth:24,textAlign:"center"}}>{form[key]}</span>
+                  <button onClick={()=>setForm(f=>({...f,[key]:f[key]+1}))} style={{width:34,height:34,borderRadius:"50%",background:"#2e7d32",border:"none",color:"#fff",fontSize:20,cursor:"pointer"}}>+</button>
+                </div>
+              </div>
+            ))}
+            <div style={{background:"#1a2f1a",borderRadius:12,padding:"10px 16px",marginBottom:20}}>
+              <div style={{fontSize:12,color:"#4caf50",fontWeight:700}}>Formation: {form.goalie}-{form.defence}-{form.midfield}-{form.forwards} · Max {maxOn} on field</div>
+            </div>
+            <div style={{fontSize:12,color:"#888",fontWeight:600,letterSpacing:1,marginBottom:8}}>DATA</div>
+            <div style={{background:"#141e2b",border:"1px solid #1e2d3d",borderRadius:12,padding:"14px 16px"}}>
+              <div style={{fontSize:13,color:"#aaa",marginBottom:12}}>All data saves automatically on this device.</div>
+              <button onClick={()=>{if(confirm("Reset roster to sample players?"))setPlayers(mkPlayers());}} style={{width:"100%",background:"none",color:"#ff9800",border:"1px solid #ff9800",borderRadius:10,padding:"10px 0",fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:10}}>Reset Roster to Defaults</button>
+              <button onClick={()=>{if(confirm("Delete ALL data? This cannot be undone.")){localStorage.clear();location.reload();}}} style={{width:"100%",background:"none",color:"#f44336",border:"1px solid #f44336",borderRadius:10,padding:"10px 0",fontSize:14,fontWeight:700,cursor:"pointer"}}>⚠️ Clear All Data</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* BOTTOM NAV */}
+      <div className="tab-bar">
+        {[{id:"field",icon:"🏟️",label:"Field"},{id:"bench",icon:"🪑",label:"Bench"},{id:"stats",icon:"📊",label:"Stats"},{id:"settings",icon:"⚙️",label:"Settings"}].map(t=>(
+          <button key={t.id} className={`tab-btn${view===t.id?" active":""}`} onClick={()=>setView(t.id)}>
+            <span className="tab-icon">{t.icon}</span>
+            <span className="tab-label" style={{fontWeight:view===t.id?700:400}}>{t.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FC({p,pt,col,load,isOut,isDue,step,goals,onTap,onEdit}){
+  const inSub=step==="selectOut";
+  const border=isOut?"#9c27b0":isDue?"#ff980066":col.active+"44";
+  const ab=isOut?"#9c27b0":isDue?"#ff9800":col.active;
+  const ac=isOut?"#ce93d8":isDue?"#ff9800":col.active;
+  return(
+    <div onClick={onTap} style={{background:isOut?"#1a0d3a":"#141e2b",border:`1.5px solid ${border}`,borderRadius:12,padding:"10px 12px",width:"calc(50% - 4px)",position:"relative",cursor:inSub?"pointer":"default",transition:"all 0.15s"}}>
+      {p.wave!=null&&<div style={{position:"absolute",top:-8,left:10,background:isDue?"#ff9800":"#1e2d3d",border:`1.5px solid ${isDue?"#ff9800":"#2a3d50"}`,color:isDue?"#000":"#aaa",borderRadius:20,fontSize:10,fontWeight:900,padding:"1px 7px"}}>{p.wave===1?"starter":`wave ${p.wave}`}</div>}
+      <div style={{position:"absolute",top:8,right:8,display:"flex",alignItems:"center",gap:4}}>
+        {goals>0&&<span style={{fontSize:10,color:"#4caf50",fontWeight:900}}>{"⚽".repeat(Math.min(goals,3))}</span>}
+        <span style={{width:9,height:9,borderRadius:"50%",background:load.color,display:"inline-block",boxShadow:`0 0 6px ${load.color}66`}}/>
+        {!inSub&&<button onClick={e=>{e.stopPropagation();onEdit();}} style={{background:"none",border:"none",color:"#555",fontSize:14,cursor:"pointer",padding:0}}>✏️</button>}
+      </div>
+      <div style={{width:36,height:36,borderRadius:"50%",background:col.active+"22",border:`2px solid ${ab}`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:16,color:ac,marginTop:6}}>{isOut?"✓":p.name[0]}</div>
+      <div style={{fontWeight:700,fontSize:14,marginTop:6,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",paddingRight:20}}>{p.name}</div>
+      <div style={{fontSize:11,color:"#888",fontVariantNumeric:"tabular-nums"}}>⏱ {fmt(pt)}</div>
+      <div style={{marginTop:7,background:isOut?"#4a1a6a":isDue?"#3a2000":"#1a2530",color:isOut?"#ce93d8":isDue?"#ff9800":"#555",border:`1px solid ${isOut?"#9c27b0":isDue?"#ff980066":"#1e2d3d"}`,borderRadius:8,padding:"5px 0",fontSize:12,fontWeight:700,textAlign:"center"}}>
+        {isOut?"✓ Coming off":inSub?"Tap to select":isDue?"Due off":"on field"}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('app')).render(<App/>);
+</script>
+</body>
+</html>
