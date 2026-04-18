@@ -136,6 +136,10 @@ function App(){
   const [showNewMod,setShowNewMod]=useState(false);  // New Game setup
   const [newOpp,setNewOpp]=useState("");              // opponent for new game
   const [statsTab,setStatsTab]=useState("game");     // "game"|"season"|"history"
+  const [showBackupMod,setShowBackupMod]=useState(false);
+  const [backupCode,setBackupCode]=useState("");
+  const [importText,setImportText]=useState("");
+  const [importError,setImportError]=useState("");
 
   const intRef=useRef(null);
   const playRef=useRef(players);
@@ -263,7 +267,123 @@ function App(){
     showT(`${newName} added`);setNewName("");setView("bench");
   };
 
-  // ── Derived ───────────────────────────────────────────────────────────────
+  // ── Backup / Restore ──────────────────────────────────────────────────────
+  const exportData=()=>{
+    const data={
+      v:1, // version
+      exported:new Date().toISOString(),
+      roster:players,
+      form,myName,oppName,halfLen,
+      cumTime,history,
+    };
+    const code=btoa(JSON.stringify(data));
+    setBackupCode(code);
+    setImportText("");
+    setImportError("");
+    setShowBackupMod(true);
+  };
+
+  const importData=()=>{
+    try{
+      const data=JSON.parse(atob(importText.trim()));
+      if(!data.v||!data.roster)throw new Error("Invalid backup code");
+      if(data.roster&&data.roster.length){
+        _pid=Math.max(...data.roster.map(p=>p.id))+1;
+        setPlayers(data.roster);
+      }
+      if(data.form)setForm(data.form);
+      if(data.myName)setMyName(data.myName);
+      if(data.oppName)setOppName(data.oppName);
+      if(data.halfLen)setHalfLen(data.halfLen);
+      if(data.cumTime)setCumTime(data.cumTime);
+      if(data.history)setHistory(data.history);
+      setShowBackupMod(false);
+      setImportText("");
+      setImportError("");
+      showT("Data restored! ✓","#2196f3");
+    }catch(e){
+      setImportError("Invalid code — please check and try again");
+    }
+  };
+
+  const copyToClipboard=text=>{
+    if(navigator.clipboard){
+      navigator.clipboard.writeText(text).then(()=>showT("Copied to clipboard!")).catch(()=>{});
+    }else{
+      const ta=document.createElement('textarea');
+      ta.value=text;ta.style.position='fixed';ta.style.opacity='0';
+      document.body.appendChild(ta);ta.select();
+      document.execCommand('copy');document.body.removeChild(ta);
+      showT("Copied to clipboard!");
+    }
+  };
+
+  const exportExcel=()=>{
+    // Build a multi-sheet CSV-style workbook using XML SpreadsheetML (opens natively in Excel & Numbers)
+    const esc=v=>{
+      if(v==null)return'';
+      const s=String(v);
+      return s.includes('"')||s.includes(',')||s.includes('\n')?`"${s.replace(/"/g,'""')}"`:s;
+    };
+    const fmtS=s=>{const m=Math.floor(Math.abs(s)/60);const sec=Math.abs(s)%60;return`${m}:${sec.toString().padStart(2,'0')}`;};
+    const fmtD=d=>new Date(d).toLocaleDateString([],{month:'short',day:'numeric',year:'numeric'});
+
+    // Sheet 1: Season Player Stats
+    const seasonRows=[
+      ['Player','Season Time','Goals Scored'],
+      ...[...players].sort((a,b)=>(cumTime[b.id]||0)-(cumTime[a.id]||0)).map(p=>{
+        const totalGoals=history.reduce((n,g)=>{return n+(g.goals||[]).filter(x=>x.scorerId===p.id).length;},0);
+        return[p.name, fmtS(cumTime[p.id]||0), totalGoals];
+      })
+    ];
+
+    // Sheet 2: Game History
+    const historyRows=[
+      ['Date','Opponent','Our Score','Their Score','Result','Our Goals','Half Length'],
+      ...history.map(g=>{
+        const res=g.score.us>g.score.them?'W':g.score.us===g.score.them?'D':'L';
+        const ourGoalsList=(g.goals||[]).filter(x=>x.side==='us').map(x=>`${x.scorerName} ${x.gameMin}'`).join('; ');
+        return[fmtD(g.date),g.oppName,g.score.us,g.score.them,res,ourGoalsList,`${g.halfLen} min`];
+      })
+    ];
+
+    // Sheet 3: Full Roster
+    const rosterRows=[
+      ['Player','Status','Position'],
+      ...players.map(p=>[p.name, p.on?'On Field':'Bench', p.pos||'—'])
+    ];
+
+    const sheetXml=(name,rows)=>{
+      const cells=rows.map((row,ri)=>
+        `<Row ss:Index="${ri+1}">${row.map((cell,ci)=>{
+          const isNum=typeof cell==='number';
+          return`<Cell><Data ss:Type="${isNum?'Number':'String'}">${String(cell).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</Data></Cell>`;
+        }).join('')}</Row>`
+      ).join('');
+      return`<Worksheet ss:Name="${name}"><Table>${cells}</Table></Worksheet>`;
+    };
+
+    const xml=`<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+<Styles>
+  <Style ss:ID="header"><Font ss:Bold="1"/><Interior ss:Color="#1a2f1a" ss:Pattern="Solid"/><Font ss:Color="#ffffff" ss:Bold="1"/></Style>
+</Styles>
+${sheetXml('Season Stats',seasonRows)}
+${sheetXml('Game History',historyRows)}
+${sheetXml('Roster',rosterRows)}
+</Workbook>`;
+
+    const blob=new Blob([xml],{type:'application/vnd.ms-excel;charset=utf-8'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=`${myName||'squad'}-stats-${new Date().toISOString().slice(0,10)}.xls`;
+    document.body.appendChild(a);a.click();
+    document.body.removeChild(a);URL.revokeObjectURL(url);
+    showT("Excel file downloaded!");
+  };
   const field=players.filter(p=>p.on);
   const bench=players.filter(p=>!p.on);
   const maxOn=form.forwards+form.midfield+form.defence+form.goalie;
@@ -509,6 +629,59 @@ function App(){
                 ✓ Confirm {selIn.length>1?`${selIn.length} Subs`:"Sub"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ BACKUP / RESTORE MODAL ═══ */}
+      {showBackupMod&&(
+        <div className="modal-overlay">
+          <div className="modal-sheet">
+            <div style={{fontSize:18,fontWeight:800,marginBottom:4,color:"#4caf50"}}>💾 Backup & Restore</div>
+
+            {/* EXCEL EXPORT */}
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:13,fontWeight:700,color:"#aaa",marginBottom:8}}>Export to Excel</div>
+              <div style={{fontSize:12,color:"#555",marginBottom:10}}>Download a spreadsheet with season stats, game history and roster — opens in Excel or Numbers.</div>
+              <button onClick={exportExcel} style={{width:"100%",background:"#1a3a2a",color:"#4caf50",border:"1px solid #4caf5066",borderRadius:10,padding:"11px 0",fontSize:14,fontWeight:700,cursor:"pointer"}}>
+                📊 Download Excel File
+              </button>
+            </div>
+
+            <div style={{borderTop:"1px solid #1e2d3d",paddingTop:16,marginBottom:16}}>
+              <div style={{fontSize:13,fontWeight:700,color:"#aaa",marginBottom:8}}>Backup code — save your data</div>
+              <div style={{fontSize:12,color:"#555",marginBottom:10}}>Copy this code and save it somewhere safe — Notes app, email to yourself, etc. Use it to restore your data on any device.</div>
+              {backupCode?(
+                <div>
+                  <div style={{background:"#0f1923",border:"1px solid #2e7d32",borderRadius:10,padding:"10px 12px",fontFamily:"monospace",fontSize:11,color:"#4caf50",wordBreak:"break-all",maxHeight:100,overflowY:"auto",marginBottom:10}}>
+                    {backupCode}
+                  </div>
+                  <button onClick={()=>copyToClipboard(backupCode)} style={{width:"100%",background:"#2e7d32",color:"#fff",border:"none",borderRadius:10,padding:"11px 0",fontSize:14,fontWeight:700,cursor:"pointer"}}>
+                    📋 Copy Backup Code
+                  </button>
+                </div>
+              ):(
+                <button onClick={exportData} style={{width:"100%",background:"#2e7d32",color:"#fff",border:"none",borderRadius:10,padding:"11px 0",fontSize:14,fontWeight:700,cursor:"pointer"}}>Generate Backup Code</button>
+              )}
+            </div>
+
+            {/* IMPORT */}
+            <div style={{borderTop:"1px solid #1e2d3d",paddingTop:16,marginBottom:16}}>
+              <div style={{fontSize:13,fontWeight:700,color:"#aaa",marginBottom:8}}>Restore — load saved data</div>
+              <div style={{fontSize:12,color:"#555",marginBottom:10}}>Paste your backup code below. This will overwrite your current data.</div>
+              <textarea
+                value={importText}
+                onChange={e=>{setImportText(e.target.value);setImportError("");}}
+                placeholder="Paste backup code here..."
+                style={{width:"100%",background:"#0f1923",border:`1px solid ${importError?"#f44336":"#1e2d3d"}`,borderRadius:10,padding:"10px 12px",color:"#fff",fontSize:13,fontFamily:"monospace",resize:"none",height:80,outline:"none",display:"block"}}
+              />
+              {importError&&<div style={{fontSize:12,color:"#f44336",marginTop:6}}>{importError}</div>}
+              <button onClick={importData} disabled={!importText.trim()} style={{width:"100%",marginTop:10,background:importText.trim()?"#1565c0":"#1a2530",color:importText.trim()?"#fff":"#555",border:"none",borderRadius:10,padding:"11px 0",fontSize:14,fontWeight:700,cursor:importText.trim()?"pointer":"default"}}>
+                Restore from Code
+              </button>
+            </div>
+
+            <button onClick={()=>{setShowBackupMod(false);setBackupCode("");setImportText("");setImportError("");}} className="btn-dim" style={{width:"100%"}}>Close</button>
           </div>
         </div>
       )}
@@ -797,6 +970,7 @@ function App(){
             <div style={{fontSize:12,color:"#888",fontWeight:600,letterSpacing:1,marginBottom:8}}>DATA</div>
             <div style={{background:"#141e2b",border:"1px solid #1e2d3d",borderRadius:12,padding:"14px 16px"}}>
               <div style={{fontSize:13,color:"#aaa",marginBottom:12}}>All data saves automatically on this device.</div>
+              <button onClick={exportData} style={{width:"100%",background:"#1a2f3a",color:"#4caf50",border:"1px solid #4caf5066",borderRadius:10,padding:"10px 0",fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:10}}>💾 Backup & Restore Data</button>
               <button onClick={()=>{if(confirm("Reset roster to sample players?"))setPlayers(mkPlayers());}} style={{width:"100%",background:"none",color:"#ff9800",border:"1px solid #ff9800",borderRadius:10,padding:"10px 0",fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:10}}>Reset Roster to Defaults</button>
               <button onClick={()=>{if(confirm("Delete ALL data? This cannot be undone.")){localStorage.clear();location.reload();}}} style={{width:"100%",background:"none",color:"#f44336",border:"1px solid #f44336",borderRadius:10,padding:"10px 0",fontSize:14,fontWeight:700,cursor:"pointer"}}>⚠️ Clear All Data</button>
             </div>
