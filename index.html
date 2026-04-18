@@ -77,17 +77,17 @@ function showT(msg,col="#4caf50"){const el=document.getElementById('toast');el.t
 
 let _pid=100;
 const mkPlayers=()=>[
-  {id:1,name:"Alex",pos:"goalie",on:true,wave:1},
-  {id:2,name:"Jordan",pos:"defence",on:true,wave:1},
-  {id:3,name:"Riley",pos:"defence",on:true,wave:1},
-  {id:4,name:"Morgan",pos:"midfield",on:true,wave:1},
-  {id:5,name:"Casey",pos:"midfield",on:true,wave:1},
-  {id:6,name:"Taylor",pos:"forward",on:true,wave:1},
-  {id:7,name:"Sam",pos:"forward",on:true,wave:1},
-  {id:8,name:"Drew",pos:"forward",on:true,wave:1},
-  {id:9,name:"Jamie",pos:null,on:false,wave:null},
-  {id:10,name:"Avery",pos:null,on:false,wave:null},
-  {id:11,name:"Quinn",pos:null,on:false,wave:null},
+  {id:1,name:"Alex",pos:"goalie",on:true,wave:1,absent:false},
+  {id:2,name:"Jordan",pos:"defence",on:true,wave:1,absent:false},
+  {id:3,name:"Riley",pos:"defence",on:true,wave:1,absent:false},
+  {id:4,name:"Morgan",pos:"midfield",on:true,wave:1,absent:false},
+  {id:5,name:"Casey",pos:"midfield",on:true,wave:1,absent:false},
+  {id:6,name:"Taylor",pos:"forward",on:true,wave:1,absent:false},
+  {id:7,name:"Sam",pos:"forward",on:true,wave:1,absent:false},
+  {id:8,name:"Drew",pos:"forward",on:true,wave:1,absent:false},
+  {id:9,name:"Jamie",pos:null,on:false,wave:null,absent:false},
+  {id:10,name:"Avery",pos:null,on:false,wave:null,absent:false},
+  {id:11,name:"Quinn",pos:null,on:false,wave:null,absent:false},
 ];
 
 function App(){
@@ -135,6 +135,7 @@ function App(){
   const [showEndMod,setShowEndMod]=useState(false);  // End Game confirmation
   const [showNewMod,setShowNewMod]=useState(false);  // New Game setup
   const [newOpp,setNewOpp]=useState("");              // opponent for new game
+  const [newGameStep,setNewGameStep]=useState("opp"); // "opp" | "attendance"
   const [statsTab,setStatsTab]=useState("game");     // "game"|"season"|"history"
   const [showBackupMod,setShowBackupMod]=useState(false);
   const [backupCode,setBackupCode]=useState("");
@@ -227,14 +228,37 @@ function App(){
     if(newOpp.trim())setOppName(newOpp.trim());
     setNewOpp("");
     setShowNewMod(false);
-    // Reset game state fully, keep roster
+    setNewGameStep("opp");
+    // Reset game state fully, keep roster and absent flags
     setRunning(false);setElapsed(0);setHalf(1);
     setHalfTime(halfLen*60);setHalfOver(false);
     setScore({us:0,them:0});setPlayTime({});setGameGoals([]);
     setGameActive(false);setWaveNum(2);cancelSub();
-    setPlayers(prev=>prev.map(p=>({...p,wave:p.on?1:null})));
+    // Move all non-absent players back to bench (reset positions/wave), absent stay absent
+    setPlayers(prev=>prev.map(p=>({
+      ...p,
+      absent:p.absent??false,
+      on: p.absent ? false : p.on, // absent players forced off
+      wave: p.absent ? null : (p.on?1:null),
+    })));
     showT("New game ready!");
     setView("field");
+  };
+
+  // Mark an absent player as arrived — moves them to bench
+  const markArrived=id=>{
+    setPlayers(prev=>prev.map(p=>p.id===id?{...p,absent:false}:p));
+    showT(`Player arrived! ✓`,"#2196f3");
+  };
+
+  // Toggle absent flag (only when game not active, i.e. in attendance setup)
+  const toggleAbsent=id=>{
+    setPlayers(prev=>prev.map(p=>{
+      if(p.id!==id)return p;
+      const nowAbsent=!p.absent;
+      // If marking absent, also take off field
+      return{...p,absent:nowAbsent,on:nowAbsent?false:p.on,pos:nowAbsent?null:p.pos,wave:nowAbsent?null:p.wave};
+    }));
   };
 
   const applyHL=m=>{setHalfLen(m);setHalfTime(m*60);setHalf(1);setHalfOver(false);setRunning(false);setElapsed(0);setPlayTime({});};
@@ -263,7 +287,7 @@ function App(){
   // ── Roster ────────────────────────────────────────────────────────────────
   const addPlayer=()=>{
     if(!newName.trim())return;
-    setPlayers(prev=>[...prev,{id:_pid++,name:newName.trim(),pos:null,on:false,wave:null}]);
+    setPlayers(prev=>[...prev,{id:_pid++,name:newName.trim(),pos:null,on:false,wave:null,absent:false}]);
     showT(`${newName} added`);setNewName("");setView("bench");
   };
 
@@ -384,8 +408,9 @@ ${sheetXml('Roster',rosterRows)}
     document.body.removeChild(a);URL.revokeObjectURL(url);
     showT("Excel file downloaded!");
   };
-  const field=players.filter(p=>p.on);
-  const bench=players.filter(p=>!p.on);
+  const field=players.filter(p=>p.on&&!p.absent);
+  const bench=players.filter(p=>!p.on&&!p.absent);
+  const absentPlayers=players.filter(p=>p.absent);
   const maxOn=form.forwards+form.midfield+form.defence+form.goalie;
   const totalPT=players.reduce((s,p)=>s+(playTime[p.id]||0),0);
   const avgT=players.length>0?totalPT/players.length:0;
@@ -475,7 +500,7 @@ ${sheetXml('Roster',rosterRows)}
         <div style={{marginTop:8,display:"flex",gap:6,fontSize:11,color:"#aaa",flexWrap:"wrap"}}>
           <span style={{background:"#1e3a1e",borderRadius:20,padding:"3px 10px",color:"#4caf50"}}>🟢 {field.length} on</span>
           <span style={{background:"#1a2530",borderRadius:20,padding:"3px 10px"}}>🪑 {bench.length} bench</span>
-          <span style={{background:"#1a2530",borderRadius:20,padding:"3px 10px"}}>👥 {players.length} total</span>
+          {absentPlayers.length>0&&<span style={{background:"#1a0808",borderRadius:20,padding:"3px 10px",color:"#f44336"}}>❌ {absentPlayers.length} absent</span>}
           {gameGoals.filter(g=>g.side==="us").length>0&&<span style={{background:"#1a2f1a",borderRadius:20,padding:"3px 10px",color:"#4caf50"}}>⚽ {gameGoals.filter(g=>g.side==="us").length}</span>}
         </div>
       </div>
@@ -547,16 +572,54 @@ ${sheetXml('Roster',rosterRows)}
       {showNewMod&&(
         <div className="modal-overlay">
           <div className="modal-sheet">
-            <div style={{fontSize:18,fontWeight:800,marginBottom:6,color:"#4caf50"}}>⚽ New Game</div>
-            <div style={{fontSize:13,color:"#aaa",marginBottom:16}}>Set the opponent for this game. Your roster stays as-is.</div>
-            <div style={{marginBottom:20}}>
-              <label style={{fontSize:12,color:"#888",display:"block",marginBottom:6}}>Opponent name</label>
-              <input type="text" value={newOpp} onChange={e=>setNewOpp(e.target.value)} placeholder={oppName||"Opponent"} onKeyDown={e=>e.key==="Enter"&&startNewGame()}/>
-            </div>
-            <div style={{display:"flex",gap:10}}>
-              <button onClick={()=>setShowNewMod(false)} className="btn-dim" style={{flex:1}}>Cancel</button>
-              <button onClick={startNewGame} style={{flex:2,background:"#2e7d32",color:"#fff",border:"none",borderRadius:10,padding:13,fontSize:15,fontWeight:800,cursor:"pointer"}}>Start New Game</button>
-            </div>
+            {newGameStep==="opp"&&(
+              <>
+                <div style={{fontSize:18,fontWeight:800,marginBottom:6,color:"#4caf50"}}>⚽ New Game</div>
+                <div style={{fontSize:13,color:"#aaa",marginBottom:16}}>Who are you playing today?</div>
+                <div style={{marginBottom:20}}>
+                  <label style={{fontSize:12,color:"#888",display:"block",marginBottom:6}}>Opponent name</label>
+                  <input type="text" value={newOpp} onChange={e=>setNewOpp(e.target.value)} placeholder={oppName||"Opponent"} onKeyDown={e=>e.key==="Enter"&&setNewGameStep("attendance")}/>
+                </div>
+                <div style={{display:"flex",gap:10}}>
+                  <button onClick={()=>{setShowNewMod(false);setNewGameStep("opp");}} className="btn-dim" style={{flex:1}}>Cancel</button>
+                  <button onClick={()=>setNewGameStep("attendance")} style={{flex:2,background:"#2e7d32",color:"#fff",border:"none",borderRadius:10,padding:13,fontSize:15,fontWeight:800,cursor:"pointer"}}>Next → Attendance</button>
+                </div>
+              </>
+            )}
+            {newGameStep==="attendance"&&(
+              <>
+                <div style={{fontSize:18,fontWeight:800,marginBottom:4,color:"#4caf50"}}>✅ Who's here today?</div>
+                <div style={{fontSize:12,color:"#888",marginBottom:14}}>Tap to mark anyone who <strong style={{color:"#f44336"}}>won't be playing</strong>. You can change this during the game if someone arrives late.</div>
+                <div style={{marginBottom:16,maxHeight:"50vh",overflowY:"auto"}}>
+                  {[...players].sort((a,b)=>a.name.localeCompare(b.name)).map(p=>{
+                    const absent=p.absent??false;
+                    return(
+                      <div key={p.id} onClick={()=>toggleAbsent(p.id)}
+                        style={{display:"flex",alignItems:"center",gap:12,padding:"11px 14px",borderRadius:12,marginBottom:8,background:absent?"#1a0a0a":"#141e2b",border:`1.5px solid ${absent?"#f4433666":"#1e2d3d"}`,cursor:"pointer",transition:"all 0.15s"}}>
+                        <div style={{width:38,height:38,borderRadius:"50%",background:absent?"#f4433622":"#1a2530",border:`2px solid ${absent?"#f44336":"#2a3d50"}`,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:16,color:absent?"#f44336":"#aaa",flexShrink:0}}>
+                          {absent?"✕":p.name[0]}
+                        </div>
+                        <div style={{flex:1}}>
+                          <div style={{fontWeight:700,fontSize:15,color:absent?"#f44336":"#fff",textDecoration:absent?"line-through":"none"}}>{p.name}</div>
+                          <div style={{fontSize:11,color:absent?"#f44336":"#555",marginTop:2}}>{absent?"Absent — tap to mark present":"Present"}</div>
+                        </div>
+                        <div style={{fontSize:20}}>{absent?"❌":"✅"}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{background:"#141e2b",borderRadius:10,padding:"10px 14px",marginBottom:14,border:"1px solid #1e2d3d"}}>
+                  <div style={{fontSize:12,color:"#aaa"}}>
+                    <span style={{color:"#4caf50",fontWeight:700}}>{players.filter(p=>!(p.absent??false)).length} present</span>
+                    {absentPlayers.length>0&&<> · <span style={{color:"#f44336",fontWeight:700}}>{absentPlayers.length} absent</span></>}
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:10}}>
+                  <button onClick={()=>setNewGameStep("opp")} className="btn-dim" style={{flex:1}}>← Back</button>
+                  <button onClick={startNewGame} style={{flex:2,background:"#2e7d32",color:"#fff",border:"none",borderRadius:10,padding:13,fontSize:15,fontWeight:800,cursor:"pointer"}}>Start Game</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -783,7 +846,8 @@ ${sheetXml('Roster',rosterRows)}
               </div>
               {step===STEPS.IDLE&&<button onClick={()=>setView("addPlayer")} style={{background:"#2e7d32",color:"#fff",border:"none",borderRadius:20,padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Add</button>}
             </div>
-            {bench.length===0&&<div style={{color:"#555",textAlign:"center",padding:30}}>No bench players</div>}
+            {bench.length===0&&absentPlayers.length===0&&<div style={{color:"#555",textAlign:"center",padding:30}}>No bench players</div>}
+            {bench.length===0&&absentPlayers.length>0&&<div style={{color:"#555",textAlign:"center",padding:"16px 0 8px"}}>No bench players present</div>}
             {[...bench].sort((a,b)=>(playTime[a.id]||0)-(playTime[b.id]||0)).map(p=>{
               const load=getLoad(playTime[p.id]||0,avgT,elapsed),isIn=selIn.includes(p.id);
               const canSel=step===STEPS.IN&&(isIn||selIn.length<selOut.length);
@@ -805,6 +869,30 @@ ${sheetXml('Roster',rosterRows)}
                 </div>
               );
             })}
+
+            {/* Absent players — always visible, can mark arrived */}
+            {absentPlayers.length>0&&step===STEPS.IDLE&&(
+              <div style={{marginTop:bench.length>0?16:0}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#f44336",letterSpacing:1,textTransform:"uppercase",marginBottom:8,display:"flex",alignItems:"center",gap:8}}>
+                  ❌ Absent today
+                  <span style={{fontSize:10,color:"#555",fontWeight:400,textTransform:"none",letterSpacing:0}}>— tap "Arrived" if they show up</span>
+                </div>
+                {absentPlayers.map(p=>(
+                  <div key={p.id} style={{background:"#110808",border:"1px solid #f4433633",borderRadius:12,padding:"10px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:12,opacity:0.8}}>
+                    <div style={{width:38,height:38,borderRadius:"50%",background:"#1a0808",border:"2px solid #f4433666",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:15,color:"#f44336",flexShrink:0}}>
+                      {p.name[0]}
+                    </div>
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:700,fontSize:14,color:"#aaa",textDecoration:"line-through"}}>{p.name}</div>
+                      <div style={{fontSize:11,color:"#555",marginTop:2}}>Not playing today</div>
+                    </div>
+                    <button onClick={()=>markArrived(p.id)} style={{background:"#1a2f1a",color:"#4caf50",border:"1px solid #4caf5066",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,cursor:"pointer",flexShrink:0}}>
+                      ✓ Arrived
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -824,22 +912,23 @@ ${sheetXml('Roster',rosterRows)}
                 {elapsed>=10&&<div style={{fontSize:12,color:"#888",marginBottom:12}}>Avg: {fmt(Math.round(avgT))} · Elapsed: {fmt(elapsed)}</div>}
                 {sortedT.map(p=>{
                   const t=playTime[p.id]||0,load=getLoad(t,avgT,elapsed),pb=Math.round((t/Math.max(maxPT,1))*100),gc=scorerCounts[p.id]||0;
+                  const isAbsent=p.absent??false;
                   return(
-                    <div key={p.id} style={{marginBottom:12}}>
+                    <div key={p.id} style={{marginBottom:12,opacity:isAbsent?0.4:1}}>
                       <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,alignItems:"center"}}>
                         <div style={{display:"flex",alignItems:"center",gap:8}}>
-                          <span style={{width:10,height:10,borderRadius:"50%",background:load.color,display:"inline-block",flexShrink:0}}/>
-                          <span style={{fontWeight:600,fontSize:14}}>{p.name}</span>
+                          <span style={{width:10,height:10,borderRadius:"50%",background:isAbsent?"#555":load.color,display:"inline-block",flexShrink:0}}/>
+                          <span style={{fontWeight:600,fontSize:14,textDecoration:isAbsent?"line-through":"none"}}>{p.name}</span>
                           {gc>0&&<span style={{fontSize:11,color:"#4caf50"}}>{"⚽".repeat(gc)}</span>}
-                          <span style={{fontSize:11,color:"#555",textTransform:"capitalize"}}>{p.on?(p.pos||"?"):"bench"}</span>
+                          <span style={{fontSize:11,color:"#555",textTransform:"capitalize"}}>{isAbsent?"absent":p.on?(p.pos||"?"):"bench"}</span>
                         </div>
                         <div style={{display:"flex",alignItems:"center",gap:6}}>
-                          {elapsed>=10&&<span style={{fontSize:11,color:load.color,fontWeight:700}}>{load.label}</span>}
+                          {!isAbsent&&elapsed>=10&&<span style={{fontSize:11,color:load.color,fontWeight:700}}>{load.label}</span>}
                           <span style={{fontSize:14,fontWeight:700,fontVariantNumeric:"tabular-nums"}}>{fmt(t)}</span>
                         </div>
                       </div>
                       <div style={{background:"#1a2530",borderRadius:20,height:8,overflow:"hidden"}}>
-                        <div style={{width:`${pb}%`,height:"100%",background:load.color,borderRadius:20,transition:"width 0.5s"}}/>
+                        <div style={{width:`${pb}%`,height:"100%",background:isAbsent?"#333":load.color,borderRadius:20,transition:"width 0.5s"}}/>
                       </div>
                     </div>
                   );
