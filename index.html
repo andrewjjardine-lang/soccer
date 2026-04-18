@@ -844,7 +844,6 @@ ${sheetXml('Roster',rosterRows)}
                 <div style={{fontSize:16,fontWeight:700}}>🪑 Bench</div>
                 {step===STEPS.IN&&<div style={{fontSize:11,color:"#ce93d8",marginTop:2}}>Select up to {selOut.length} to come on</div>}
               </div>
-              {step===STEPS.IDLE&&<button onClick={()=>setView("addPlayer")} style={{background:"#2e7d32",color:"#fff",border:"none",borderRadius:20,padding:"6px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Add</button>}
             </div>
             {bench.length===0&&absentPlayers.length===0&&<div style={{color:"#555",textAlign:"center",padding:30}}>No bench players</div>}
             {bench.length===0&&absentPlayers.length>0&&<div style={{color:"#555",textAlign:"center",padding:"16px 0 8px"}}>No bench players present</div>}
@@ -864,7 +863,6 @@ ${sheetXml('Roster',rosterRows)}
                       {elapsed>=10&&<span style={{fontSize:11,color:load.color,fontWeight:700}}>{load.label}</span>}
                     </div>
                   </div>
-                  {step===STEPS.IDLE&&<button onClick={e=>{e.stopPropagation();setPlayers(prev=>prev.filter(x=>x.id!==p.id));showT("Removed");}} style={{background:"none",color:"#c62828",border:"1px solid #c62828",borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer"}}>Remove</button>}
                   {step===STEPS.IN&&<div style={{fontSize:12,color:isIn?"#ce93d8":"#555",fontWeight:700}}>{isIn?`#${selIn.indexOf(p.id)+1}`:"Tap"}</div>}
                 </div>
               );
@@ -1019,29 +1017,20 @@ ${sheetXml('Roster',rosterRows)}
           </div>
         )}
 
-        {/* ADD PLAYER */}
-        {view==="addPlayer"&&(
-          <div>
-            <div style={{fontSize:16,fontWeight:700,marginBottom:16}}>➕ Add Player</div>
-            <div style={{marginBottom:20}}>
-              <label style={{fontSize:12,color:"#888",display:"block",marginBottom:6}}>Name</label>
-              <input type="text" value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Enter name..." onKeyDown={e=>e.key==="Enter"&&addPlayer()}/>
-              <div style={{fontSize:11,color:"#555",marginTop:6}}>Position assigned when they come on.</div>
-            </div>
-            <button onClick={addPlayer} className="btn-green">Add to Bench</button>
-          </div>
-        )}
-
         {/* SETTINGS */}
         {view==="settings"&&(
           <div>
             <div style={{fontSize:16,fontWeight:700,marginBottom:14}}>⚙️ Settings</div>
+
+            {/* Team names */}
             <div style={{background:"#141e2b",border:"1px solid #1e2d3d",borderRadius:12,padding:"14px 16px",marginBottom:10}}>
               <div style={{fontSize:12,color:"#888",marginBottom:8,fontWeight:600,letterSpacing:1}}>TEAM NAME</div>
               <input type="text" value={myName} onChange={e=>setMyName(e.target.value)} style={{marginBottom:12}}/>
               <div style={{fontSize:12,color:"#888",marginBottom:8,fontWeight:600,letterSpacing:1}}>DEFAULT OPPONENT</div>
               <input type="text" value={oppName} onChange={e=>setOppName(e.target.value)}/>
             </div>
+
+            {/* Formation */}
             <div style={{fontSize:12,color:"#888",fontWeight:600,letterSpacing:1,margin:"14px 0 8px"}}>FORMATION</div>
             {["forwards","midfield","defence","goalie"].map(key=>(
               <div key={key} style={{background:"#141e2b",border:"1px solid #1e2d3d",borderRadius:12,padding:"12px 16px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -1056,11 +1045,61 @@ ${sheetXml('Roster',rosterRows)}
             <div style={{background:"#1a2f1a",borderRadius:12,padding:"10px 16px",marginBottom:20}}>
               <div style={{fontSize:12,color:"#4caf50",fontWeight:700}}>Formation: {form.goalie}-{form.defence}-{form.midfield}-{form.forwards} · Max {maxOn} on field</div>
             </div>
-            <div style={{fontSize:12,color:"#888",fontWeight:600,letterSpacing:1,marginBottom:8}}>DATA</div>
+
+            {/* ── ROSTER MANAGEMENT ── */}
+            <div style={{fontSize:12,color:"#888",fontWeight:600,letterSpacing:1,marginBottom:8}}>ROSTER MANAGEMENT</div>
+            <div style={{background:"#141e2b",border:"1px solid #1e2d3d",borderRadius:12,padding:"14px 16px",marginBottom:10}}>
+              <div style={{fontSize:12,color:"#555",marginBottom:12}}>Add, rename, or remove players from your squad. Changes take effect immediately.</div>
+
+              {/* Add new player */}
+              <div style={{display:"flex",gap:8,marginBottom:16}}>
+                <input type="text" value={newName} onChange={e=>setNewName(e.target.value)}
+                  placeholder="New player name..." onKeyDown={e=>e.key==="Enter"&&addPlayer()}
+                  style={{flex:1,padding:"10px 12px",fontSize:14}}/>
+                <button onClick={addPlayer} disabled={!newName.trim()} style={{background:newName.trim()?"#2e7d32":"#1a2530",color:newName.trim()?"#fff":"#555",border:"none",borderRadius:10,padding:"10px 16px",fontSize:14,fontWeight:700,cursor:newName.trim()?"pointer":"default",flexShrink:0}}>+ Add</button>
+              </div>
+
+              {/* Player list */}
+              <div style={{fontSize:11,color:"#555",marginBottom:10,fontWeight:600,letterSpacing:1}}>ALL PLAYERS ({players.length})</div>
+              {[...players].sort((a,b)=>a.name.localeCompare(b.name)).map(p=>{
+                const isEditing=editP?.id===p.id;
+                return(
+                  <div key={p.id} style={{background:"#0f1923",borderRadius:10,padding:"10px 12px",marginBottom:8,border:"1px solid #1e2d3d"}}>
+                    {isEditing?(
+                      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                        <input type="text" value={editP.name} onChange={e=>setEditP(ep=>({...ep,name:e.target.value}))}
+                          onKeyDown={e=>{if(e.key==="Enter"){setPlayers(prev=>prev.map(pl=>pl.id===editP.id?{...pl,name:editP.name}:pl));setEditP(null);showT("Name updated");}}}
+                          style={{flex:1,padding:"8px 10px",fontSize:14}} autoFocus/>
+                        <button onClick={()=>{setPlayers(prev=>prev.map(pl=>pl.id===editP.id?{...pl,name:editP.name}:pl));setEditP(null);showT("Name updated");}} style={{background:"#2e7d32",color:"#fff",border:"none",borderRadius:8,padding:"8px 12px",fontSize:13,fontWeight:700,cursor:"pointer"}}>Save</button>
+                        <button onClick={()=>setEditP(null)} style={{background:"none",color:"#888",border:"1px solid #333",borderRadius:8,padding:"8px 10px",fontSize:13,cursor:"pointer"}}>✕</button>
+                      </div>
+                    ):(
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <div style={{width:34,height:34,borderRadius:"50%",background:"#1a2530",border:"2px solid #2a3d50",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:14,color:"#aaa",flexShrink:0}}>
+                          {p.name[0]}
+                        </div>
+                        <div style={{flex:1}}>
+                          <div style={{fontWeight:700,fontSize:14}}>{p.name}</div>
+                          <div style={{fontSize:11,color:"#555",marginTop:1}}>
+                            {p.absent?"❌ absent":p.on?"🟢 on field":"🪑 bench"}
+                            {cumTime[p.id]>0?` · ${fmt(cumTime[p.id]||0)} total`:""}
+                          </div>
+                        </div>
+                        <button onClick={()=>setEditP({...p})} style={{background:"none",color:"#aaa",border:"1px solid #2a3d50",borderRadius:8,padding:"6px 10px",fontSize:12,cursor:"pointer",flexShrink:0}}>Rename</button>
+                        <button onClick={()=>{if(confirm(`Remove ${p.name} from the roster? This cannot be undone.`)){setPlayers(prev=>prev.filter(x=>x.id!==p.id));showT(`${p.name} removed`,"#ff9800");}}} style={{background:"none",color:"#f44336",border:"1px solid #f4433666",borderRadius:8,padding:"6px 10px",fontSize:12,cursor:"pointer",flexShrink:0}}>Remove</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Data */}
+            <div style={{fontSize:12,color:"#888",fontWeight:600,letterSpacing:1,marginBottom:8,marginTop:6}}>DATA</div>
             <div style={{background:"#141e2b",border:"1px solid #1e2d3d",borderRadius:12,padding:"14px 16px"}}>
               <div style={{fontSize:13,color:"#aaa",marginBottom:12}}>All data saves automatically on this device.</div>
               <button onClick={exportData} style={{width:"100%",background:"#1a2f3a",color:"#4caf50",border:"1px solid #4caf5066",borderRadius:10,padding:"10px 0",fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:10}}>💾 Backup & Restore Data</button>
-              <button onClick={()=>{if(confirm("Reset roster to sample players?"))setPlayers(mkPlayers());}} style={{width:"100%",background:"none",color:"#ff9800",border:"1px solid #ff9800",borderRadius:10,padding:"10px 0",fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:10}}>Reset Roster to Defaults</button>
+              <button onClick={()=>{if(confirm("Reset roster to sample players? This removes all current players.")){setPlayers(mkPlayers());_pid=100;showT("Roster reset");}}} style={{width:"100%",background:"none",color:"#ff9800",border:"1px solid #ff9800",borderRadius:10,padding:"10px 0",fontSize:14,fontWeight:700,cursor:"pointer",marginBottom:10}}>Reset Roster to Defaults</button>
               <button onClick={()=>{if(confirm("Delete ALL data? This cannot be undone.")){localStorage.clear();location.reload();}}} style={{width:"100%",background:"none",color:"#f44336",border:"1px solid #f44336",borderRadius:10,padding:"10px 0",fontSize:14,fontWeight:700,cursor:"pointer"}}>⚠️ Clear All Data</button>
             </div>
           </div>
